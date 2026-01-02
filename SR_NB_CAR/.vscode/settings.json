@@ -1,0 +1,20 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.espIdfPathWin": "d:\\ESP_TOOL\\v5.5.1\\esp-idf",
+  "idf.pythonInstallPath": "d:\\ESP_TOOL\\IDF_TOOLS\\tools\\idf-python\\3.11.2\\python.exe",
+  "idf.openOcdConfigs": [
+    "board/esp32-wrover-kit-3.3v.cfg"
+  ],
+  "idf.portWin": "COM10",
+  "idf.toolsPathWin": "d:\\ESP_TOOL\\IDF_TOOLS",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32"
+  },
+  "clangd.path": "d:\\ESP_TOOL\\IDF_TOOLS\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=c:\\Users\\19649\\Desktop\\Code\\SR_NB_CAR\\build"
+  ],
+  "idf.flashType": "UART"
+}
