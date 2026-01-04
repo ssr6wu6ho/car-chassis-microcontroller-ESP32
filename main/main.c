@@ -7,6 +7,8 @@ void app_main(void)
     // 初始化
     i2c_bus_init();
     i2c_sensor_mpu6050_init();
+    i2c_sensor_ssd1306_init();
     //任务函数
     xTaskCreate(mpu6050_task, "mpu6050_task", 2048, NULL, 5, NULL);
+    xTaskCreate(oled_test_task, "oled_test_task", 2048, NULL, 5, NULL);
 }

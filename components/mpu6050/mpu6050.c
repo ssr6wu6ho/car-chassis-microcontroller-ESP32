@@ -5,11 +5,12 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 #include <time.h>
 #include <sys/time.h>
 #include "esp_system.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "mpu6050.h"
 
 #define ALPHA 0.99f             /*!< Weight of gyroscope */
@@ -35,7 +36,7 @@ const uint8_t MPU6050_ALL_INTERRUPTS = (MPU6050_DATA_RDY_INT_BIT | MPU6050_I2C_M
 
 typedef struct
 {
-    i2c_port_t bus;
+    i2c_master_dev_handle_t i2c_dev;
     gpio_num_t int_pin;
     uint16_t dev_addr;
     uint32_t counter;
@@ -43,72 +44,84 @@ typedef struct
     struct timeval *timer;
 } mpu6050_dev_t;
 
-static esp_err_t mpu6050_write(mpu6050_handle_t sensor, const uint8_t reg_start_addr, const uint8_t *const data_buf, const uint8_t data_len)
+static esp_err_t mpu6050_write(mpu6050_handle_t sensor,
+                               uint8_t reg,
+                               const uint8_t *data,
+                               uint8_t len)
 {
-    mpu6050_dev_t *sens = (mpu6050_dev_t *)sensor;
-    esp_err_t ret;
+    mpu6050_dev_t *s = (mpu6050_dev_t *)sensor;
 
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    ret = i2c_master_start(cmd);
-    assert(ESP_OK == ret);
-    ret = i2c_master_write_byte(cmd, sens->dev_addr | I2C_MASTER_WRITE, true);
-    assert(ESP_OK == ret);
-    ret = i2c_master_write_byte(cmd, reg_start_addr, true);
-    assert(ESP_OK == ret);
-    ret = i2c_master_write(cmd, data_buf, data_len, true);
-    assert(ESP_OK == ret);
-    ret = i2c_master_stop(cmd);
-    assert(ESP_OK == ret);
-    ret = i2c_master_cmd_begin(sens->bus, cmd, 1000 / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete(cmd);
+    uint8_t buf[1 + len];
+    buf[0] = reg;
+    memcpy(&buf[1], data, len);
 
-    return ret;
+    return i2c_master_transmit(s->i2c_dev, buf, sizeof(buf), 1000);
 }
 
-static esp_err_t mpu6050_read(mpu6050_handle_t sensor, const uint8_t reg_start_addr, uint8_t *const data_buf, const uint8_t data_len)
+/* 代替原来的 mpu6050_read() */
+static esp_err_t mpu6050_read(mpu6050_handle_t sensor,
+                              uint8_t reg,
+                              uint8_t *data,
+                              uint8_t len)
 {
-    mpu6050_dev_t *sens = (mpu6050_dev_t *)sensor;
-    esp_err_t ret;
-
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    ret = i2c_master_start(cmd);
-    assert(ESP_OK == ret);
-    ret = i2c_master_write_byte(cmd, sens->dev_addr | I2C_MASTER_WRITE, true);
-    assert(ESP_OK == ret);
-    ret = i2c_master_write_byte(cmd, reg_start_addr, true);
-    assert(ESP_OK == ret);
-    ret = i2c_master_start(cmd);
-    assert(ESP_OK == ret);
-    ret = i2c_master_write_byte(cmd, sens->dev_addr | I2C_MASTER_READ, true);
-    assert(ESP_OK == ret);
-    ret = i2c_master_read(cmd, data_buf, data_len, I2C_MASTER_LAST_NACK);
-    assert(ESP_OK == ret);
-    ret = i2c_master_stop(cmd);
-    assert(ESP_OK == ret);
-    ret = i2c_master_cmd_begin(sens->bus, cmd, 1000 / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete(cmd);
-
-    return ret;
+    mpu6050_dev_t *s = (mpu6050_dev_t *)sensor;
+    return i2c_master_transmit_receive(s->i2c_dev,
+                                       &reg, 1,
+                                       data, len,
+                                       1000);
 }
 
-mpu6050_handle_t mpu6050_create(i2c_port_t port, const uint16_t dev_addr)
+mpu6050_handle_t mpu6050_create(i2c_master_bus_handle_t bus_handle,
+                                uint16_t dev_addr)
 {
-    mpu6050_dev_t *sensor = (mpu6050_dev_t *)calloc(1, sizeof(mpu6050_dev_t));
-    sensor->bus = port;
-    sensor->dev_addr = dev_addr << 1;
-    sensor->counter = 0;
-    sensor->dt = 0;
-    sensor->timer = (struct timeval *)calloc(1, sizeof(struct timeval));
-    return (mpu6050_handle_t)sensor;
+    mpu6050_dev_t *s = calloc(1, sizeof(*s));
+    if (!s)
+    {
+        return NULL; // 内存分配失败，直接返回NULL
+    }
+
+    /* 将 MPU6050 挂到 I2C 总线上 */
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = dev_addr, /* 0x68 或 0x69 */
+        .scl_speed_hz = 400000,
+    };
+    esp_err_t err = i2c_master_bus_add_device(bus_handle, &dev_cfg, &s->i2c_dev);
+    if (err != ESP_OK)
+    {
+        free(s); // 释放已分配的设备结构体
+        return NULL;
+    }
+
+    s->counter = 0;
+    s->dt = 0;
+
+    // 修复关键点 1: 为 timer 分配内存
+    s->timer = (struct timeval *)malloc(sizeof(struct timeval));
+    if (!s->timer)
+    {
+        // 分配失败时释放已分配的资源
+        i2c_master_bus_rm_device(s->i2c_dev);
+        free(s);
+        return NULL;
+    }
+
+    // 修复关键点 2: 正确初始化 timer
+    gettimeofday(s->timer, NULL); // 传入 s->timer (struct timeval*)
+
+    return s;
 }
 
 void mpu6050_delete(mpu6050_handle_t sensor)
 {
-    mpu6050_dev_t *sens = (mpu6050_dev_t *)sensor;
-    free(sens->timer); 
-    free(sens);
+    mpu6050_dev_t *s = (mpu6050_dev_t *)sensor;
+    if (s)
+    {
+        if (s->i2c_dev)
+            i2c_master_bus_rm_device(s->i2c_dev);
+        free(s);
+    }
 }
-
 esp_err_t mpu6050_get_deviceid(mpu6050_handle_t sensor, uint8_t *const deviceid)
 {
     return mpu6050_read(sensor, MPU6050_WHO_AM_I, deviceid, 1);

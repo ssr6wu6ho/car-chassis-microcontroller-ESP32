@@ -141,7 +141,8 @@ extern "C"
      *     - NULL Fail
      *     - Others Success
      */
-    mpu6050_handle_t mpu6050_create(i2c_port_t port, const uint16_t dev_addr);
+    mpu6050_handle_t mpu6050_create(i2c_master_bus_handle_t bus_handle,
+                                    uint16_t dev_addr);
     /**
      * @brief 删除并释放传感器对象，释放相关资源。
      * @param sensor object handle of mpu6050
