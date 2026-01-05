@@ -96,7 +96,7 @@ mpu6050_handle_t mpu6050_create(i2c_master_bus_handle_t bus_handle,
     s->counter = 0;
     s->dt = 0;
 
-    // 修复关键点 1: 为 timer 分配内存
+    // 为 timer 分配内存
     s->timer = (struct timeval *)malloc(sizeof(struct timeval));
     if (!s->timer)
     {
@@ -106,7 +106,7 @@ mpu6050_handle_t mpu6050_create(i2c_master_bus_handle_t bus_handle,
         return NULL;
     }
 
-    // 修复关键点 2: 正确初始化 timer
+    // 正确初始化 timer
     gettimeofday(s->timer, NULL); // 传入 s->timer (struct timeval*)
 
     return s;
