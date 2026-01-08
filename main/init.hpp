@@ -3,22 +3,26 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/i2c_master.h"
-#include "mpu6050.h"
 #include "esp_log.h"
+#include "mpu6050.h"
 #include "ssd1306.h"
+#include "bottom.h"
 // 图标和字体文件
 #include "ssd1306_bitmap_animator.h"
 // ================== 配置区域 ==================
-#define PWM_LIGHT_PIN 2
-#define I2C_MASTER_SCL_IO 22                   // I2C 时钟线 SCL 连接到 GPIO22
-#define I2C_MASTER_SDA_IO 21                   // I2C 数据线 SDA 连接到 GPIO21
-#define I2C_MASTER_NUM I2C_NUM_0               // 使用 I2C 控制器 0
-#define MPU6050_I2C_ADDRESS 0x68u              /*MPU6050的默认I2C地址（当AD0引脚接地时为0x68）*/
-
+#define BOTTOM_LEFT_PIN 33
+#define BOTTOM_RIGHT_PIN 32
+#define RGB_PIN 27
+#define I2C_MASTER_SCL_IO 22     // I2C 时钟线 SCL 连接到 GPIO22
+#define I2C_MASTER_SDA_IO 21     // I2C 数据线 SDA 连接到 GPIO21
+#define I2C_MASTER_NUM I2C_NUM_0 // 使用 I2C 控制器 0
+#define MPU6050_I2C_ADDRESS 0x68u
+#define SSD1306_I2C_ADDRESS 0x3C
 static i2c_master_bus_handle_t i2c_bus = NULL; // 总线句柄
 static mpu6050_handle_t mpu6050 = NULL;
-
 static ssd1306_handle_t oled = NULL;
+static bottom_handle_t left_bottom = NULL;
+static bottom_handle_t right_bottom = NULL;
 
 // ================== 全局状态 ==================
 
@@ -51,26 +55,42 @@ static void i2c_sensor_mpu6050_init(void)
 
 static void i2c_sensor_ssd1306_init(void)
 {
+    // 已经尽力修改驱动函数了后续会像mpu6050一样传入简单的参数去修改
+    // 先保证能跑就行
     ssd1306_config_t cfg = {
         .width = 128,
         .height = 64,
         .fb = NULL, // let driver allocate internally
         .fb_len = 0,
-        .iface.i2c =
-            {
-                .port = I2C_NUM_0,
-                .addr = 0x3C,            // typical SSD1306 I2C address
-                .rst_gpio = GPIO_NUM_NC, // no reset pin
-            },
+        // I2c
+        .port = I2C_NUM_0,
+        .addr = SSD1306_I2C_ADDRESS, // typical SSD1306 I2C address
+        .rst_gpio = GPIO_NUM_NC,     // no reset pin
     };
-    ssd1306_new_i2c(&cfg, &oled);
+    ssd1306_connect_i2c(i2c_bus, &cfg, &oled);
+}
 
-    int frame = 0;
-    while (1)
-    {
-        ssd1306_draw_bitmap(oled, 0, 0, frames_eye[frame], FRAME_WIDTH, FRAME_HEIGHT);
-        frame = (frame + 1) % FRAME_COUNT;
-        vTaskDelay(7);
-        ssd1306_display(oled);
+// 初始化所有按钮
+static void bottom_init(void) {
+    ESP_LOGI("bottomInit", "Initializing buttons...");
+    
+    // 创建左按钮实例
+    left_bottom = button_create(BOTTOM_LEFT_PIN);
+    if (left_bottom == NULL) {
+        ESP_LOGE("bottomInit", "Failed to create left button");
+        return;
     }
+    button_init_single(left_bottom);
+    
+    // 创建右按钮实例
+    right_bottom = button_create(BOTTOM_RIGHT_PIN);
+    if (right_bottom == NULL) {
+        ESP_LOGE("bottomInit", "Failed to create right button");
+        button_delete(left_bottom);
+        left_bottom = NULL;
+        return;
+    }
+    button_init_single(right_bottom);
+    
+    ESP_LOGI("bottomInit", "Buttons initialized successfully");
 }

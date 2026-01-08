@@ -17,7 +17,6 @@ extern "C"
 {
 #endif
 
-  
     /**
      * @brief Bitmap font descriptor.
      *
@@ -26,41 +25,31 @@ extern "C"
      */
     typedef struct
     {
-        uint8_t width;         /*!< Glyph width in pixels (e.g. 5) */
-        uint8_t height;        /*!< Glyph height in pixels (e.g. 7) */
-        uint8_t first;         /*!< First supported ASCII code (e.g. 32) */
-        uint8_t last;          /*!< Last supported ASCII code (e.g. 126) */
-        const uint8_t *bitmap; /*!< Pointer to font bitmap data */
+        uint8_t width;         // 字符宽度（像素），例如5（5x7字体）
+        uint8_t height;        // 字符高度（像素），例如7
+        uint8_t first;         // 支持的起始ASCII码，例如32（空格）
+        uint8_t last;          // 支持的结束ASCII码，例如126（~）
+        const uint8_t *bitmap; // 指向字体位图数据的指针
     } ssd1306_font_t;
 
     /**
-     * @brief I2C interface configuration.
+     * @brief 主配置结构
      */
     typedef struct
     {
-        i2c_port_num_t port; /*!< I2C port number */
-        gpio_num_t rst_gpio; /*!< Optional reset GPIO (GPIO_NUM_NC if unused) */
-        uint8_t addr;        /*!< 7-bit I2C address (usually 0x3C or 0x3D) */
-    } ssd1306_i2c_cfg_t;
 
-    /**
-     * @brief Display configuration structure for initialization.
-     */
-    typedef struct
-    {
-        union
-        {
-            ssd1306_i2c_cfg_t i2c; /*!< I2C configuration */
-        } iface;
+        uint8_t *fb;     // 可选的帧缓冲区指针
+        size_t fb_len;   // 帧缓冲区长度（字节）
+        uint16_t width;  // 显示宽度（像素）
+        uint16_t height; // 显示高度（像素）
 
-        uint8_t *fb;       /*!< Optional framebuffer pointer (NULL to auto-allocate) */
-        size_t fb_len;     /*!< Framebuffer length in bytes */
-        uint16_t width;    /*!< Display width in pixels */
-        uint16_t height;   /*!< Display height in pixels */
+        i2c_port_num_t port; // I2C端口号（如I2C_NUM_0）
+        gpio_num_t rst_gpio; // 复位引脚（GPIO_NUM_NC表示不使用）
+        uint8_t addr;        // 7位I2C地址（0x3C或0x3D）
     } ssd1306_config_t;
 
     /**
-     * @brief Display handle type.
+     * @brief 显示句柄
      */
     typedef struct ssd1306_t *ssd1306_handle_t;
 
@@ -71,16 +60,7 @@ extern "C"
      * @param[out] out Returned display handle.
      * @return ESP_OK on success, error otherwise.
      */
-    esp_err_t ssd1306_new_i2c(const ssd1306_config_t *cfg, ssd1306_handle_t *out);
-
-    /**
-     * @brief Create and initialize a new SSD1306 display on SPI.
-     *
-     * @param[in]  cfg Configuration parameters.
-     * @param[out] out Returned display handle.
-     * @return ESP_OK on success, error otherwise.
-     */
-    esp_err_t ssd1306_new_spi(const ssd1306_config_t *cfg, ssd1306_handle_t *out);
+    esp_err_t ssd1306_connect_i2c(i2c_master_bus_handle_t bus_handle, const ssd1306_config_t *cfg, ssd1306_handle_t *out);
 
     /**
      * @brief Set the active font for text drawing.
@@ -230,7 +210,14 @@ extern "C"
      * @return ESP_OK on success.
      */
     esp_err_t ssd1306_display(ssd1306_handle_t h);
-
+/**
+     * @brief 画bitmap图
+     * @param h     Display handle.
+     * @param x,y   起点的xy坐标
+     * @param bitmap 位图文件
+     * @param width height  位图文件的宽度和高度
+     * @return ESP_OK on success.
+     */
     esp_err_t ssd1306_draw_bitmap(ssd1306_handle_t h, int x, int y, const uint8_t *bitmap, int width, int height);
 
 #ifdef __cplusplus
