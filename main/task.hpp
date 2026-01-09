@@ -11,7 +11,7 @@ void task_mpu6050GetParam(void *pvParameter)
         mpu6050_get_gyro(mpu6050, &mpu6050_gyro);
         mpu6050_get_temp(mpu6050, &mpu6050_temp);
         mpu6050_complimentory_filter(mpu6050, &mpu6050_acce, &mpu6050_gyro, &mpu6050_angle);
-        //ESP_LOGI("MPU6050", "Roll: %.3f°, Pitch: %.3f°", mpu6050_angle.roll, mpu6050_angle.pitch);
+        // ESP_LOGI("MPU6050", "Roll: %.3f°, Pitch: %.3f°", mpu6050_angle.roll, mpu6050_angle.pitch);
         vTaskDelay(pdMS_TO_TICKS(20)); // 建议 ≤50ms，滤波需要高频采样
     }
 }
@@ -227,5 +227,55 @@ void bottom_driver_task(void *arg)
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+void RGB_task(void *arg)
+{
+    // 清空
+    ws2812_clear();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    while (1)
+    {
+        // 1. 红色常亮（3秒）
+        printf("红色常亮\n");
+        ws2812_solid_color(255, 0, 0);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+
+        // 2. 绿色常亮（3秒）
+        printf("绿色常亮\n");
+        ws2812_solid_color(0, 255, 0);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+
+        // 3. 蓝色常亮（3秒）
+        printf("蓝色常亮\n");
+        ws2812_solid_color(0, 0, 255);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+
+        // 4. 白色常亮（3秒）
+        printf("白色常亮\n");
+        ws2812_solid_color(255, 255, 255);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+
+        // 5. 蓝色呼吸灯（10秒）
+        printf("蓝色呼吸灯\n");
+        for (int i = 0; i < 600; i++)
+        {                                            // 约10秒
+            ws2812_color_breathing(0, 0, 255, 2000); // 蓝色，周期2秒
+        }
+
+        // 6. 彩虹呼吸灯（10秒）
+        printf("彩虹呼吸灯\n");
+        for (int i = 0; i < 600; i++)
+        {                                   // 约10秒
+            ws2812_rainbow_breathing(3000); // 周期3秒
+        }
+
+        // 清空
+        ws2812_clear();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        printf("循环重新开始...\n");
     }
 }

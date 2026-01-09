@@ -7,6 +7,7 @@
 #include "mpu6050.h"
 #include "ssd1306.h"
 #include "bottom.h"
+#include "ws2812_rmt.h"
 // 图标和字体文件
 #include "ssd1306_bitmap_animator.h"
 // ================== 配置区域 ==================
@@ -71,26 +72,34 @@ static void i2c_sensor_ssd1306_init(void)
 }
 
 // 初始化所有按钮
-static void bottom_init(void) {
+static void bottom_init(void)
+{
     ESP_LOGI("bottomInit", "Initializing buttons...");
-    
+
     // 创建左按钮实例
     left_bottom = button_create(BOTTOM_LEFT_PIN);
-    if (left_bottom == NULL) {
+    if (left_bottom == NULL)
+    {
         ESP_LOGE("bottomInit", "Failed to create left button");
         return;
     }
     button_init_single(left_bottom);
-    
+
     // 创建右按钮实例
     right_bottom = button_create(BOTTOM_RIGHT_PIN);
-    if (right_bottom == NULL) {
+    if (right_bottom == NULL)
+    {
         ESP_LOGE("bottomInit", "Failed to create right button");
         button_delete(left_bottom);
         left_bottom = NULL;
         return;
     }
     button_init_single(right_bottom);
-    
+
     ESP_LOGI("bottomInit", "Buttons initialized successfully");
+}
+
+static void RGB_init(void)
+{
+    ws2812_init(RGB_PIN);
 }
