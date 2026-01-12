@@ -1,8 +1,21 @@
 #include "init.hpp"
 #include <math.h>
 
-// ================== 任务函数 ==================
-void task_mpu6050GetParam(void *pvParameter)
+// // ================== 任务函数 ==================
+// void task_mpu6050GetParam(void *pvParameter)
+// {
+//     while (1)
+//     {
+//         // 读取原始传感器数据
+//         mpu6050_get_acce(mpu6050, &mpu6050_acce);
+//         mpu6050_get_gyro(mpu6050, &mpu6050_gyro);
+//         mpu6050_get_temp(mpu6050, &mpu6050_temp);
+//         // ESP_LOGI("MPU6050", "Roll: %.3f°, Pitch: %.3f°", mpu6050_angle.roll, mpu6050_angle.pitch);
+//         vTaskDelay(pdMS_TO_TICKS(20)); // 建议 ≤50ms，滤波需要高频采样
+//     }
+// }
+
+void task_mpu6050GetParam_EKF(void *pvParameter)
 {
     while (1)
     {
@@ -10,25 +23,35 @@ void task_mpu6050GetParam(void *pvParameter)
         mpu6050_get_acce(mpu6050, &mpu6050_acce);
         mpu6050_get_gyro(mpu6050, &mpu6050_gyro);
         mpu6050_get_temp(mpu6050, &mpu6050_temp);
-        mpu6050_complimentory_filter(mpu6050, &mpu6050_acce, &mpu6050_gyro, &mpu6050_angle);
-        // ESP_LOGI("MPU6050", "Roll: %.3f°, Pitch: %.3f°", mpu6050_angle.roll, mpu6050_angle.pitch);
-        vTaskDelay(pdMS_TO_TICKS(20)); // 建议 ≤50ms，滤波需要高频采样
+
+        // 转换数据单位（假设原始数据是g和°/s）
+        float accel[3], gyro[3];
+
+        // MPU6050加速度计数据 (转换为m/s²)
+        accel[0] = mpu6050_acce.acce_x * 9.80665f; // x轴
+        accel[1] = mpu6050_acce.acce_y * 9.80665f; // y轴
+        accel[2] = mpu6050_acce.acce_z * 9.80665f; // z轴
+
+        // MPU6050陀螺仪数据 (转换为rad/s)
+        const float deg2rad = M_PI / 180.0f;
+        gyro[0] = mpu6050_gyro.gyro_x * deg2rad; // x轴
+        gyro[1] = mpu6050_gyro.gyro_y * deg2rad; // y轴
+        gyro[2] = mpu6050_gyro.gyro_z * deg2rad; // z轴
+
+        // 使用卡尔曼滤波计算姿态
+        EKF_MPU6050::Attitude attitude = ekf_filter.update(accel, gyro);
+
+        // 输出结果
+        mpu6050_angle.roll = attitude.roll;
+        mpu6050_angle.pitch = attitude.pitch;
+
+        // 可选：获取陀螺仪偏差（用于调试）
+        float gyro_bias[3];
+        ekf_filter.getGyroBias(gyro_bias);
+
+        vTaskDelay(pdMS_TO_TICKS(20)); // 20ms采样周期
     }
 }
-
-// void task_ssd1306_animator(void *pvParameters)
-// {
-//     int frame = 0;
-//     while (1)
-//     {
-//         ssd1306_draw_bitmap(oled, 0, 0, frames_eye[frame], FRAME_WIDTH, FRAME_HEIGHT);
-//         frame = (frame + 1) % FRAME_COUNT_48;
-//         vTaskDelay(7);
-//         ssd1306_display(oled);
-//     }
-// }
-
-// 显示MPU6050数据
 void task_oled_display_fancy_ui_enhanced(void *pvParameter)
 {
 // 历史位置记录（用于绘制轨迹效果）
@@ -86,7 +109,7 @@ void task_oled_display_fancy_ui_enhanced(void *pvParameter)
         ssd1306_draw_circle(oled, center_x, center_y, dot_radius, true);
 
         // 3. 获取MPU6050数据并绘制动态元素
-        mpu6050_complimentory_filter(mpu6050, &mpu6050_acce, &mpu6050_gyro, &mpu6050_angle);
+        //mpu6050_complimentory_filter(mpu6050, &mpu6050_acce, &mpu6050_gyro, &mpu6050_angle);
 
         // 显示左侧数值
         snprintf(roll_str, sizeof(roll_str), "Roll: %.1f", mpu6050_angle.roll);
@@ -230,6 +253,18 @@ void bottom_driver_task(void *arg)
     }
 }
 
+void task_ssd1306_animator(void *pvParameters)
+{
+    int frame = 0;
+    while (1)
+    {
+        ssd1306_draw_bitmap(oled, 0, 0, frames_eye[frame], FRAME_WIDTH, FRAME_HEIGHT);
+        frame = (frame + 1) % FRAME_COUNT_48;
+        vTaskDelay(7);
+        ssd1306_display(oled);
+    }
+}
+
 void RGB_task(void *arg)
 {
     // 清空
@@ -238,44 +273,8 @@ void RGB_task(void *arg)
 
     while (1)
     {
-        // 1. 红色常亮（3秒）
-        printf("红色常亮\n");
-        ws2812_solid_color(255, 0, 0);
-        vTaskDelay(pdMS_TO_TICKS(3000));
-
-        // 2. 绿色常亮（3秒）
-        printf("绿色常亮\n");
-        ws2812_solid_color(0, 255, 0);
-        vTaskDelay(pdMS_TO_TICKS(3000));
-
-        // 3. 蓝色常亮（3秒）
-        printf("蓝色常亮\n");
-        ws2812_solid_color(0, 0, 255);
-        vTaskDelay(pdMS_TO_TICKS(3000));
-
-        // 4. 白色常亮（3秒）
-        printf("白色常亮\n");
-        ws2812_solid_color(255, 255, 255);
-        vTaskDelay(pdMS_TO_TICKS(3000));
-
-        // 5. 蓝色呼吸灯（10秒）
-        printf("蓝色呼吸灯\n");
-        for (int i = 0; i < 600; i++)
-        {                                            // 约10秒
-            ws2812_color_breathing(0, 0, 255, 2000); // 蓝色，周期2秒
-        }
-
-        // 6. 彩虹呼吸灯（10秒）
-        printf("彩虹呼吸灯\n");
-        for (int i = 0; i < 600; i++)
-        {                                   // 约10秒
-            ws2812_rainbow_breathing(3000); // 周期3秒
-        }
-
-        // 清空
+        ws2812_rainbow_breathing(3000); // 周期3秒
         ws2812_clear();
         vTaskDelay(pdMS_TO_TICKS(1000));
-
-        printf("循环重新开始...\n");
     }
 }
