@@ -1,22 +1,10 @@
 #include "init.hpp"
 #include <math.h>
 
-// // ================== 任务函数 ==================
-// void task_mpu6050GetParam(void *pvParameter)
-// {
-//     while (1)
-//     {
-//         // 读取原始传感器数据
-//         mpu6050_get_acce(mpu6050, &mpu6050_acce);
-//         mpu6050_get_gyro(mpu6050, &mpu6050_gyro);
-//         mpu6050_get_temp(mpu6050, &mpu6050_temp);
-//         // ESP_LOGI("MPU6050", "Roll: %.3f°, Pitch: %.3f°", mpu6050_angle.roll, mpu6050_angle.pitch);
-//         vTaskDelay(pdMS_TO_TICKS(20)); // 建议 ≤50ms，滤波需要高频采样
-//     }
-// }
-
 void task_mpu6050GetParam_EKF(void *pvParameter)
 {
+    const TickType_t OUTPUT_PERIOD = pdMS_TO_TICKS(1000);
+    const TickType_t EKF_UPDATE_PERIOD = pdMS_TO_TICKS(20); // 50 Hz EKF
     while (1)
     {
         // 读取原始传感器数据
@@ -48,7 +36,6 @@ void task_mpu6050GetParam_EKF(void *pvParameter)
         // 可选：获取陀螺仪偏差（用于调试）
         float gyro_bias[3];
         ekf_filter.getGyroBias(gyro_bias);
-
         vTaskDelay(pdMS_TO_TICKS(20)); // 20ms采样周期
     }
 }
@@ -109,7 +96,7 @@ void task_oled_display_fancy_ui_enhanced(void *pvParameter)
         ssd1306_draw_circle(oled, center_x, center_y, dot_radius, true);
 
         // 3. 获取MPU6050数据并绘制动态元素
-        //mpu6050_complimentory_filter(mpu6050, &mpu6050_acce, &mpu6050_gyro, &mpu6050_angle);
+        // mpu6050_complimentory_filter(mpu6050, &mpu6050_acce, &mpu6050_gyro, &mpu6050_angle);
 
         // 显示左侧数值
         snprintf(roll_str, sizeof(roll_str), "Roll: %.1f", mpu6050_angle.roll);
@@ -180,7 +167,6 @@ void task_oled_display_fancy_ui_enhanced(void *pvParameter)
         vTaskDelay(pdMS_TO_TICKS(20)); // 20Hz刷新率（更平滑）
     }
 }
-
 void bottom_driver_task(void *arg)
 {
 
@@ -252,7 +238,6 @@ void bottom_driver_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
-
 void task_ssd1306_animator(void *pvParameters)
 {
     int frame = 0;
@@ -264,7 +249,6 @@ void task_ssd1306_animator(void *pvParameters)
         ssd1306_display(oled);
     }
 }
-
 void RGB_task(void *arg)
 {
     // 清空
@@ -274,7 +258,150 @@ void RGB_task(void *arg)
     while (1)
     {
         ws2812_rainbow_breathing(3000); // 周期3秒
-        ws2812_clear();
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+void ec11_test_task(void *arg)
+{
+    ec11_event_t event;
+    int counter = 0;
+    while (1)
+    {
+        // 等待事件（阻塞，最多等待100ms）
+        if (ec11_wait_event(ec11_handle, &event, pdMS_TO_TICKS(100)))
+        {
+            switch (event)
+            {
+            case EC11_EVENT_CW:
+                counter++;
+                ESP_LOGI("EC11", "Rotary CW, counter: %d", counter);
+                break;
+
+            case EC11_EVENT_CCW:
+                counter--;
+                ESP_LOGI("EC11", "Rotary CCW, counter: %d", counter);
+                break;
+
+            case EC11_EVENT_SHORT_PRESS:
+                ESP_LOGI("EC11", "Button short press");
+                // 重置计数器
+                counter = 0;
+                ESP_LOGI("EC11", "Counter reset to 0");
+                break;
+
+            case EC11_EVENT_LONG_PRESS:
+                ESP_LOGI("EC11", "Button long press");
+                // 长按可以做其他操作，比如进入配置模式
+                break;
+
+            case EC11_EVENT_RELEASED:
+                ESP_LOGI("EC11", "Button released");
+                break;
+
+            case EC11_EVENT_NONE:
+            default:
+                break;
+            }
+        }
+    }
+}
+
+static uint16_t calibration_value_0 = 30;    // Real 0 degree angle
+static uint16_t calibration_value_180 = 195; // Real 0 degree angle
+static void servo_test_task(void *arg)
+{
+    while (1) {
+        // Set the angle of the servo
+        for (int i = calibration_value_0; i <= calibration_value_180; i += 1) {
+            iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, i);
+            vTaskDelay(20 / portTICK_PERIOD_MS);
+        }
+        // Return to the initial position
+        iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, calibration_value_0);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+    vTaskDelete(NULL);
+}
+
+void motor_control_task(void *pvParameters)
+{
+    char response[64];
+    float current_angle = 0.0f;
+    // 等待UART稳定
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // 1. 基础配置
+    ESP_LOGI("foc", "步骤1: 配置电机A");
+
+    // 先发送简单的命令测试通信
+    ESP_LOGI("foc", "测试通信...");
+    esp_err_t ret = motor_send_and_wait('A', "S0", response, sizeof(response), 500);
+    if (ret == ESP_OK)
+    {
+        ESP_LOGI("foc", "通信测试成功: %s", response);
+    }
+    else
+    {
+        ESP_LOGW("foc", "通信测试失败，继续尝试配置...");
+    }
+
+    while (1)
+    {
+        // 2. 速度模式测试
+        ESP_LOGI("foc", "步骤2: 速度模式 (100°/s, 2秒)");
+
+        motor_send_cmd('A', "V"); // 进入速度模式
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        motor_send_cmd('A', "100"); // 设置速度
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        motor_send_cmd('A', "E1"); // 使能
+        vTaskDelay(pdMS_TO_TICKS(2000));
+
+        motor_send_cmd('A', "E0"); // 失能
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // 3. 位置模式测试
+        ESP_LOGI("foc", "步骤3: 位置模式 (45度)");
+
+        motor_send_cmd('A', "P"); // 进入位置模式
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        motor_send_cmd('A', "45"); // 设置目标位置
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        motor_send_cmd('A', "E1"); // 使能
+        vTaskDelay(pdMS_TO_TICKS(1500));
+
+        motor_send_cmd('A', "E0"); // 失能
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // 4. 查询角度
+        ESP_LOGI("foc", "步骤4: 查询当前角度");
+
+        for (int retry = 0; retry < 3; retry++)
+        {
+            memset(response, 0, sizeof(response));
+
+            if (motor_send_and_wait('A', "S0", response, sizeof(response), 300) == ESP_OK)
+            {
+                ESP_LOGI("foc", "收到角度响应: '%s'", response);
+
+                if (motor_parse_angle_response(response, &current_angle) == ESP_OK)
+                {
+                    ESP_LOGI("foc", "解析成功: %.2f 度", current_angle);
+                    break;
+                }
+                else
+                {
+                    ESP_LOGW("foc", "解析失败，原始数据: %s", response);
+                }
+            }
+            else
+            {
+                ESP_LOGW("foc", "查询角度超时，重试 %d/3", retry + 1);
+                vTaskDelay(pdMS_TO_TICKS(200));
+            }
+        }
     }
 }
