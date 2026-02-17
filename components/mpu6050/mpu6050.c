@@ -13,7 +13,7 @@
 #include "driver/i2c_master.h"
 #include "mpu6050.h"
 
-#define ALPHA 0.99f             /*!< Weight of gyroscope */
+#define ALPHA 0.75             /*!< Weight of gyroscope */
 #define RAD_TO_DEG 57.27272727f /*!< Radians to degrees */
 
 /* MPU6050 register */

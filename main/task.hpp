@@ -1,6 +1,10 @@
+// task.hpp
 #include "init.hpp"
 #include <math.h>
-
+typedef struct
+{
+    motor_handle_t *handle;
+} motor_task_params_t;
 void task_mpu6050GetParam_EKF(void *pvParameter)
 {
     const TickType_t OUTPUT_PERIOD = pdMS_TO_TICKS(1000);
@@ -12,31 +16,29 @@ void task_mpu6050GetParam_EKF(void *pvParameter)
         mpu6050_get_gyro(mpu6050, &mpu6050_gyro);
         mpu6050_get_temp(mpu6050, &mpu6050_temp);
 
-        // 转换数据单位（假设原始数据是g和°/s）
-        float accel[3], gyro[3];
+        // // 转换数据单位（假设原始数据是g和°/s）
+        // float accel[3], gyro[3];
 
-        // MPU6050加速度计数据 (转换为m/s²)
-        accel[0] = mpu6050_acce.acce_x * 9.80665f; // x轴
-        accel[1] = mpu6050_acce.acce_y * 9.80665f; // y轴
-        accel[2] = mpu6050_acce.acce_z * 9.80665f; // z轴
+        // // MPU6050加速度计数据 (转换为m/s²)
+        // accel[0] = mpu6050_acce.acce_x * 9.80665f; // x轴
+        // accel[1] = mpu6050_acce.acce_y * 9.80665f; // y轴
+        // accel[2] = mpu6050_acce.acce_z * 9.80665f; // z轴
 
-        // MPU6050陀螺仪数据 (转换为rad/s)
-        const float deg2rad = M_PI / 180.0f;
-        gyro[0] = mpu6050_gyro.gyro_x * deg2rad; // x轴
-        gyro[1] = mpu6050_gyro.gyro_y * deg2rad; // y轴
-        gyro[2] = mpu6050_gyro.gyro_z * deg2rad; // z轴
+        // // MPU6050陀螺仪数据 (转换为rad/s)
+        // const float deg2rad = M_PI / 180.0f;
+        // gyro[0] = mpu6050_gyro.gyro_x * deg2rad; // x轴
+        // gyro[1] = mpu6050_gyro.gyro_y * deg2rad; // y轴
+        // gyro[2] = mpu6050_gyro.gyro_z * deg2rad; // z轴
 
-        // 使用卡尔曼滤波计算姿态
-        EKF_MPU6050::Attitude attitude = ekf_filter.update(accel, gyro);
+        // //使用卡尔曼滤波计算姿态
+        // //EKF_MPU6050::Attitude attitude = ekf_filter.update(accel, gyro);
 
-        // 输出结果
-        mpu6050_angle.roll = attitude.roll;
-        mpu6050_angle.pitch = attitude.pitch;
+        // mpu6050_angle.roll = attitude.roll;
+        // mpu6050_angle.pitch = attitude.pitch;
 
-        // 可选：获取陀螺仪偏差（用于调试）
-        float gyro_bias[3];
-        ekf_filter.getGyroBias(gyro_bias);
-        vTaskDelay(pdMS_TO_TICKS(20)); // 20ms采样周期
+        mpu6050_complimentory_filter(mpu6050, &mpu6050_acce, &mpu6050_gyro, &mpu6050_angle);
+
+        vTaskDelay(pdMS_TO_TICKS(5)); //  6050大约为200hz（5ms））的采样率
     }
 }
 void task_oled_display_fancy_ui_enhanced(void *pvParameter)
@@ -305,103 +307,188 @@ void ec11_test_task(void *arg)
     }
 }
 
-static uint16_t calibration_value_0 = 30;    // Real 0 degree angle
-static uint16_t calibration_value_180 = 195; // Real 0 degree angle
-static void servo_test_task(void *arg)
+static uint16_t l_calibration_value_0 = 195;  // Real 0 degree angle
+static uint16_t l_calibration_value_76 = 125; // Real 0 degree angle
+static void left_servo_test_task(void *arg)
 {
-    while (1) {
-        // Set the angle of the servo
-        for (int i = calibration_value_0; i <= calibration_value_180; i += 1) {
-            iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, i);
-            vTaskDelay(20 / portTICK_PERIOD_MS);
-        }
-        // Return to the initial position
-        iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, calibration_value_0);
+    while (1)
+    {
+        // 设置左边舵机从0度转到180度（与右边同向）
+        // for (int i = l_calibration_value_0; i >= l_calibration_value_76; i -= 1)
+        // {
+        //     iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, i);
+        //     vTaskDelay(20 / portTICK_PERIOD_MS);
+        // }
+        iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, l_calibration_value_0);
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
-    vTaskDelete(NULL);
 }
 
+static uint16_t r_calibration_value_0 = 30;   // Real 0 degree angle
+static uint16_t r_calibration_value_76 = 100; // Real 0 degree angle
+static void right_servo_test_task(void *arg)
+{
+    while (1)
+    {
+        // 设置右边舵机
+        // for (int i = r_calibration_value_0; i <= r_calibration_value_76; i += 1)
+        // {
+        //     iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 1, i);
+        //     vTaskDelay(20 / portTICK_PERIOD_MS);
+        // }
+        iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 1, r_calibration_value_0);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+}
+
+// 通用电机控制任务
 void motor_control_task(void *pvParameters)
 {
+    motor_task_params_t *params = (motor_task_params_t *)pvParameters;
+    motor_handle_t *handle = params->handle;
+    char motor_id = handle->motor_id; // 从句柄中获取电机 ID
+
     char response[64];
     float current_angle = 0.0f;
-    // 等待UART稳定
+
+    // 等待 UART 稳定
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // 1. 基础配置
-    ESP_LOGI("foc", "步骤1: 配置电机A");
-
-    // 先发送简单的命令测试通信
-    ESP_LOGI("foc", "测试通信...");
-    esp_err_t ret = motor_send_and_wait('A', "S0", response, sizeof(response), 500);
+    ESP_LOGI("foc", "Motor %c on UART%d: testing communication...", motor_id, handle->uart_port);
+    esp_err_t ret = motor_send_and_wait(handle, "S0", response, sizeof(response), 500);
     if (ret == ESP_OK)
     {
-        ESP_LOGI("foc", "通信测试成功: %s", response);
+        ESP_LOGI("foc", "Motor %c: communication OK, response: %s", motor_id, response);
     }
     else
     {
-        ESP_LOGW("foc", "通信测试失败，继续尝试配置...");
+        ESP_LOGW("foc", "Motor %c: communication failed, will continue...", motor_id);
     }
 
     while (1)
     {
-        // 2. 速度模式测试
-        ESP_LOGI("foc", "步骤2: 速度模式 (100°/s, 2秒)");
-
-        motor_send_cmd('A', "V"); // 进入速度模式
+        // 速度模式测试
+        ESP_LOGI("foc", "Motor %c: speed mode (100°/s, 2s)", motor_id);
+        motor_send_cmd(handle, "V");
         vTaskDelay(pdMS_TO_TICKS(100));
-
-        motor_send_cmd('A', "100"); // 设置速度
+        motor_send_cmd(handle, "100");
         vTaskDelay(pdMS_TO_TICKS(100));
-
-        motor_send_cmd('A', "E1"); // 使能
+        motor_send_cmd(handle, "E1");
         vTaskDelay(pdMS_TO_TICKS(2000));
-
-        motor_send_cmd('A', "E0"); // 失能
+        motor_send_cmd(handle, "E0");
         vTaskDelay(pdMS_TO_TICKS(500));
 
-        // 3. 位置模式测试
-        ESP_LOGI("foc", "步骤3: 位置模式 (45度)");
-
-        motor_send_cmd('A', "P"); // 进入位置模式
+        // 位置模式测试
+        ESP_LOGI("foc", "Motor %c: position mode (45°)", motor_id);
+        motor_send_cmd(handle, "P");
         vTaskDelay(pdMS_TO_TICKS(100));
-
-        motor_send_cmd('A', "45"); // 设置目标位置
+        motor_send_cmd(handle, "45");
         vTaskDelay(pdMS_TO_TICKS(100));
-
-        motor_send_cmd('A', "E1"); // 使能
+        motor_send_cmd(handle, "E1");
         vTaskDelay(pdMS_TO_TICKS(1500));
-
-        motor_send_cmd('A', "E0"); // 失能
+        motor_send_cmd(handle, "E0");
         vTaskDelay(pdMS_TO_TICKS(500));
 
-        // 4. 查询角度
-        ESP_LOGI("foc", "步骤4: 查询当前角度");
-
+        // 查询角度
+        ESP_LOGI("foc", "Motor %c: query angle", motor_id);
         for (int retry = 0; retry < 3; retry++)
         {
             memset(response, 0, sizeof(response));
-
-            if (motor_send_and_wait('A', "S0", response, sizeof(response), 300) == ESP_OK)
+            if (motor_send_and_wait(handle, "S0", response, sizeof(response), 300) == ESP_OK)
             {
-                ESP_LOGI("foc", "收到角度响应: '%s'", response);
-
+                ESP_LOGI("foc", "Motor %c: raw response: '%s'", motor_id, response);
                 if (motor_parse_angle_response(response, &current_angle) == ESP_OK)
                 {
-                    ESP_LOGI("foc", "解析成功: %.2f 度", current_angle);
+                    ESP_LOGI("foc", "Motor %c: angle = %.2f°", motor_id, current_angle);
                     break;
                 }
                 else
                 {
-                    ESP_LOGW("foc", "解析失败，原始数据: %s", response);
+                    ESP_LOGW("foc", "Motor %c: parse failed, raw: %s", motor_id, response);
                 }
             }
             else
             {
-                ESP_LOGW("foc", "查询角度超时，重试 %d/3", retry + 1);
+                ESP_LOGW("foc", "Motor %c: query timeout, retry %d/3", motor_id, retry + 1);
                 vTaskDelay(pdMS_TO_TICKS(200));
             }
+        }
+    }
+}
+void balance_control_task(void *pvParameters)
+{
+    float target_angle = 0.0f;
+    float current_angle = 0.0f;
+    float error = 0.0f;
+    float output_speed = 0.0f;
+    float left_speed = 0.0f;
+    float right_speed = 0.0f;
+    char left_cmd[16];
+    char right_cmd[16];
+
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // 左电机（A）- 逆时针为正
+    motor_send_cmd(motor_handle_1, "V");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    motor_send_cmd(motor_handle_1, "0");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    motor_send_cmd(motor_handle_1, "E1");
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // 右电机（B）- 顺时针为正
+    motor_send_cmd(motor_handle_2, "V");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    motor_send_cmd(motor_handle_2, "0");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    motor_send_cmd(motor_handle_2, "E1");
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    ESP_LOGI("balance", "Motor directions: A(CCW+), B(CW+)");
+
+    TickType_t last_wake_time = xTaskGetTickCount();
+    const TickType_t control_period = pdMS_TO_TICKS(10);
+
+    while (1)
+    {
+        vTaskDelayUntil(&last_wake_time, control_period);
+
+        // 获取当前俯仰角
+        current_angle = mpu6050_angle.pitch;
+
+        // 计算误差（目标角度 - 当前角度）
+        error = target_angle - current_angle;
+
+        // 使用PID计算期望速度
+        pid_compute(angle_pid, error, &output_speed);
+
+        // 限幅
+        if (output_speed > angle_param.max_output)
+            output_speed = angle_param.max_output;
+        if (output_speed < angle_param.min_output)
+            output_speed = angle_param.min_output;
+
+        // 关键修改：根据电机转向调整速度符号
+        // 假设需要车体向前运动时：
+        // - 左电机需要逆时针（正速度）
+        // - 右电机需要顺时针（正速度）
+        // 但两个电机实际转向相反，所以需要符号一致
+        // 这里我们保持左电机为正方向，右电机取反
+        left_speed = output_speed;   // 左电机保持原符号
+        right_speed = -output_speed; // 右电机符号取反
+
+        // 转换为字符串发送
+        snprintf(left_cmd, sizeof(left_cmd), "%d", (int)left_speed);
+        snprintf(right_cmd, sizeof(right_cmd), "%d", (int)right_speed);
+
+        motor_send_cmd(motor_handle_1, left_cmd);
+        motor_send_cmd(motor_handle_2, right_cmd);
+
+        // 可选：调试输出
+        if ((int)output_speed != 0)
+        {
+            ESP_LOGI("balance", "angle=%.2f, output=%d, L=%d, R=%d",
+                     current_angle, (int)output_speed, (int)left_speed, (int)right_speed);
         }
     }
 }

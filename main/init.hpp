@@ -13,9 +13,12 @@
 #include "ec11.h"
 #include "foc.h"
 #include "iot_servo.h"
+#include "pid_ctrl.h"
 // 图标和字体文件
 #include "ssd1306_bitmap_animator.h"
-// ================== 配置区域 ==================
+// 电机编号左AUart1右BUart2
+// 转向是A逆时针B顺时针
+//  ================== 配置区域 ==================
 #define BOTTOM_LEFT_PIN GPIO_NUM_33
 #define BOTTOM_RIGHT_PIN GPIO_NUM_32
 #define RGB_PIN GPIO_NUM_48          // RGB引脚改为48
@@ -34,14 +37,14 @@
 // UART配置
 #define UART_NUM UART_NUM_1
 #define UART_BAUD 921600
-#define UART_TX_PIN 17
-#define UART_RX_PIN 18
+#define UART_TX_PIN 15
+#define UART_RX_PIN 16
 #define UART_BUF_SIZE 256
 // UART2 配置
 #define UART2_NUM UART_NUM_2
 #define UART2_BAUD 921600 // 可以根据需要调整
-#define UART2_TX_PIN 15
-#define UART2_RX_PIN 16
+#define UART2_TX_PIN 17
+#define UART2_RX_PIN 18
 #define UART2_BUF_SIZE 256
 // UART超时配置
 #define CMD_TIMEOUT_MS 100 // 命令发送后等待响应时间
@@ -49,13 +52,20 @@
 // 全局变量用于存储UART句柄
 static QueueHandle_t uart_queue = NULL;
 static QueueHandle_t uart2_queue;
-// 全局句柄
+// PID
+pid_ctrl_block_handle_t angle_pid;
+// 左右PID暂时不需要
+// pid_ctrl_block_handle_t speed_left_pid, speed_right_pid;
+//  全局句柄
 static i2c_master_bus_handle_t i2c_bus = NULL; // 总线句柄
 static mpu6050_handle_t mpu6050 = NULL;
 static ssd1306_handle_t oled = NULL;
 static bottom_handle_t left_bottom = NULL;
 static bottom_handle_t right_bottom = NULL;
 static ec11_handle_t ec11_handle = NULL;
+motor_handle_t *motor_handle_1 = NULL;
+motor_handle_t *motor_handle_2 = NULL;
+static pid_ctrl_parameter_t angle_param;
 static EKF_MPU6050 ekf_filter;
 
 // ================== 全局状态 ==================
@@ -153,14 +163,16 @@ esp_err_t uart1_init(void)
 
     // 6. 清空缓冲区
     uart_flush(UART_NUM);
+    // 创建电机句柄
+    motor_handle_1 = motor_init(UART_NUM, 'A');
+    if (!motor_handle_1)
+    {
+        ESP_LOGE("uart", "Failed to create motor handle for UART1");
+        return ESP_FAIL;
+    }
 
-    ESP_LOGI("uart", "UART1 initialized on UART%d (TX:%d, RX:%d, %d bps)",
-             UART_NUM, UART_TX_PIN, UART_RX_PIN, UART_BAUD);
-
+    ESP_LOGI("uart", "UART1 initialized and motor handle created");
     return ESP_OK;
-
-    // 设置电机uart
-    foc_set_uart_port(UART_NUM);
 }
 
 esp_err_t uart2_init(void)
@@ -218,11 +230,17 @@ esp_err_t uart2_init(void)
     // 清空缓冲区
     uart_flush(UART2_NUM);
 
-    ESP_LOGI("uart2", "UART2 initialized (TX:%d, RX:%d, %d bps)",
-             UART2_TX_PIN, UART2_RX_PIN, UART2_BAUD);
+    motor_handle_2 = motor_init(UART2_NUM, 'B');
+    if (!motor_handle_2)
+    {
+        ESP_LOGE("uart2", "Failed to create motor handle for UART2");
+        return ESP_FAIL;
+    }
 
+    ESP_LOGI("uart2", "UART2 initialized and motor handle created");
     return ESP_OK;
 }
+
 static void mpu6050_ekf_init(void)
 {
     mpu6050 = mpu6050_create(i2c_bus, MPU6050_I2C_ADDRESS);
@@ -317,6 +335,8 @@ static void servo_init(void)
         },
         .channel_number = 1,
     };
+
+    iot_servo_init(LEDC_LOW_SPEED_MODE, &servo_l_cfg);
     servo_config_t servo_r_cfg = {
         .max_angle = 180,
         .min_width_us = 500,
@@ -325,13 +345,29 @@ static void servo_init(void)
         .timer_number = LEDC_TIMER_0,
         .channels = {
             .servo_pin = {
-                SERVO_L_PIN,
+                SERVO_R_PIN,
             },
             .ch = {
-                LEDC_CHANNEL_0,
+                LEDC_CHANNEL_1,
             },
         },
         .channel_number = 1,
     };
     iot_servo_init(LEDC_LOW_SPEED_MODE, &servo_r_cfg);
+}
+
+void pid_init(void)
+{
+    // 角度环PID参数（PD控制）
+    angle_param = {
+        .kp = 200.0f,         // 比例系数，决定响应速度
+        .ki = 0.0f,           // 积分项通常不用（直立控制）
+        .kd = 4,              // 微分系数，增加阻尼
+        .max_output = 500.0f, // 最大期望速度 °/s
+        .min_output = -500.0f,
+        .max_integral = 0.0f,
+        .min_integral = 0.0f,
+        .cal_type = PID_CAL_TYPE_POSITIONAL};
+    pid_ctrl_config_t angle_config = {.init_param = angle_param};
+    pid_new_control_block(&angle_config, &angle_pid);
 }
